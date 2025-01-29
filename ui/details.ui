@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.38.2 -->
+<!-- Generated with glade 3.40.0 -->
 <interface>
   <requires lib="gtk+" version="3.22"/>
   <object class="GtkAdjustment" id="adjustment1">
@@ -788,10 +788,12 @@
                             <property name="margin-top">3</property>
                             <child>
                               <object class="GtkScrolledWindow" id="scrolledwindow6">
-                                <property name="height-request">150</property>
+                                <property name="height-request">200</property>
                                 <property name="visible">True</property>
                                 <property name="can-focus">True</property>
+                                <property name="hexpand">True</property>
                                 <property name="shadow-type">etched-in</property>
+                                <property name="propagate-natural-width">True</property>
                                 <child>
                                   <object class="GtkTreeView" id="inspection-apps">
                                     <property name="visible">True</property>
@@ -3506,7 +3508,7 @@
                             <property name="margin-start">12</property>
                             <property name="margin-top">3</property>
                             <child>
-                              <!-- n-columns=2 n-rows=7 -->
+                              <!-- n-columns=2 n-rows=8 -->
                               <object class="GtkGrid" id="table37">
                                 <property name="visible">True</property>
                                 <property name="can-focus">False</property>
@@ -3545,6 +3547,7 @@
                                     <property name="halign">start</property>
                                     <property name="label" translatable="yes">label508</property>
                                     <property name="selectable">True</property>
+                                    <property name="ellipsize">start</property>
                                   </object>
                                   <packing>
                                     <property name="left-attach">1</property>
@@ -3599,6 +3602,19 @@
                                   <packing>
                                     <property name="left-attach">1</property>
                                     <property name="top-attach">6</property>
+                                  </packing>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel" id="char-clipboard-sharing">
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">False</property>
+                                    <property name="halign">start</property>
+                                    <property name="label" translatable="yes">label507</property>
+                                    <property name="selectable">True</property>
+                                  </object>
+                                  <packing>
+                                    <property name="left-attach">1</property>
+                                    <property name="top-attach">7</property>
                                   </packing>
                                 </child>
                                 <child>
@@ -3671,6 +3687,18 @@
                                   <packing>
                                     <property name="left-attach">0</property>
                                     <property name="top-attach">6</property>
+                                  </packing>
+                                </child>
+                                <child>
+                                  <object class="GtkLabel" id="char-clipboard-sharing-label">
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">False</property>
+                                    <property name="halign">end</property>
+                                    <property name="label" translatable="yes">Clipboard:</property>
+                                  </object>
+                                  <packing>
+                                    <property name="left-attach">0</property>
+                                    <property name="top-attach">7</property>
                                   </packing>
                                 </child>
                                 <child>
@@ -3772,6 +3800,7 @@
                                     <property name="can-focus">False</property>
                                     <property name="halign">start</property>
                                     <property name="label">label</property>
+                                    <property name="wrap">True</property>
                                     <property name="selectable">True</property>
                                   </object>
                                   <packing>

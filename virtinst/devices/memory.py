@@ -19,6 +19,8 @@ class _DeviceMemoryTarget(XMLBuilder):
     block = XMLProperty("./block", is_int=True)
     requested = XMLProperty("./requested", is_int=True)
     current = XMLProperty("./current", is_int=True)
+    address_base = XMLProperty("./address/@base")
+    dynamicMemslots = XMLProperty("./@dynamicMemslots", is_yesno=True)
 
 
 class _DeviceMemorySource(XMLBuilder):

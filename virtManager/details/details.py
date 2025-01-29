@@ -4,8 +4,6 @@
 # This work is licensed under the GNU GPLv2 or later.
 # See the COPYING file in the top-level directory.
 
-import re
-
 from gi.repository import Gtk
 
 import libvirt
@@ -207,10 +205,12 @@ def _label_for_device(dev, disk_bus_index):
         return _("Console %(num)d") % {"num": port + 1}
 
     if devtype == "channel":
-        name = vmmAddHardware.char_pretty_channel_name(dev.target_name)
-        if name:
-            return _("Channel %(name)s") % {"name": name}
         pretty_type = vmmAddHardware.char_pretty_type(dev.type)
+        name = vmmAddHardware.char_pretty_channel_name(dev.target_name)
+        # Don't print channel name with qemu-vdagent, to avoid ambiguity
+        # with the typical spice agent channel
+        if name and dev.type != "qemu-vdagent":
+            return _("Channel (%(name)s)") % {"type": pretty_type, "name": name}
         return _("Channel %(type)s") % {"type": pretty_type}
 
     if devtype == "graphics":
@@ -316,25 +316,6 @@ def _get_performance_icon_name():
     if not Gtk.IconTheme.get_default().has_icon(icon):
         icon = "system-run"  # pragma: no cover
     return icon
-
-
-def _unindent_device_xml(xml):
-    lines = xml.splitlines()
-    if not lines:
-        return xml  # pragma: no cover
-
-    ret = ""
-    unindent = 0
-    for c in lines[0]:
-        if c != " ":
-            break
-        unindent += 1
-
-    for line in lines:
-        if re.match(r"^%s *<.*$" % (unindent * " "), line):
-            line = line[unindent:]
-        ret += line + "\n"
-    return ret
 
 
 class vmmDetails(vmmGObjectUI):
@@ -794,6 +775,8 @@ class vmmDetails(vmmGObjectUI):
             virtinst.DomainCpu.SPECIAL_MODE_HOST_MODEL, False])
         model.append(["host-passthrough", "05",
             virtinst.DomainCpu.SPECIAL_MODE_HOST_PASSTHROUGH, False])
+        model.append(["maximum", "06",
+            virtinst.DomainCpu.SPECIAL_MODE_MAXIMUM, False])
         model.append([None, None, None, True])
         for name in domcaps.get_cpu_models():
             model.append([name, name, name, False])
@@ -1108,7 +1091,7 @@ class vmmDetails(vmmGObjectUI):
 
     def _browse_file(self, callback, reason=None):
         if not reason:
-            reason = self.config.CONFIG_DIR_IMAGE
+            reason = vmmStorageBrowser.REASON_IMAGE
 
         if self.storage_browser is None:
             self.storage_browser = vmmStorageBrowser(self.conn)
@@ -1254,9 +1237,9 @@ class vmmDetails(vmmGObjectUI):
     def _disk_source_browse_clicked_cb(self, src):
         disk = self._get_hw_row()[HW_LIST_COL_DEVICE]
         if disk.is_floppy():
-            reason = self.config.CONFIG_DIR_FLOPPY_MEDIA
+            reason = vmmStorageBrowser.REASON_FLOPPY_MEDIA
         else:
-            reason = self.config.CONFIG_DIR_ISO_MEDIA
+            reason = vmmStorageBrowser.REASON_ISO_MEDIA
 
         def cb(ignore, path):
             self._mediacombo.set_path(path)
@@ -1691,7 +1674,8 @@ class vmmDetails(vmmGObjectUI):
         try:
             dev = row[HW_LIST_COL_DEVICE]
             if dev:
-                self._xmleditor.set_xml(_unindent_device_xml(dev.get_xml()))
+                self._xmleditor.set_xml(
+                        virtinst.xmlutil.unindent_device_xml(dev.get_xml()))
             else:
                 self._xmleditor.set_xml_from_libvirtobject(self.vm)
 
@@ -1933,7 +1917,8 @@ class vmmDetails(vmmGObjectUI):
         # CPU model config
         model = cpu.model or None
         is_host = (cpu.mode in ["host-model", "host-passthrough"])
-        if not model and is_host:
+        is_special_mode = (cpu.mode in virtinst.DomainCpu.SPECIAL_MODES)
+        if not model and is_special_mode:
             model = cpu.mode
 
         if model:
@@ -2076,9 +2061,7 @@ class vmmDetails(vmmGObjectUI):
         self.tpmdetails.set_dev(tpmdev)
 
     def _refresh_panic_page(self, dev):
-        model = dev.model or "isa"
-        pmodel = vmmAddHardware.panic_pretty_model(model)
-        self.widget("panic-model").set_text(pmodel)
+        self.widget("panic-model").set_text(dev.model or "")
 
     def _refresh_rng_page(self, dev):
         is_random = dev.backend_model == "random"
@@ -2098,6 +2081,7 @@ class vmmDetails(vmmGObjectUI):
         primary = self.vm.serial_is_console_dup(chardev)
         show_target_type = not (char_type in ["serial", "parallel"])
         is_qemuga = chardev.target_name == chardev.CHANNEL_NAME_QEMUGA
+        show_clipboard = chardev.type == chardev.TYPE_QEMUVDAGENT
 
         if char_type == "serial":
             typelabel = _("Serial Device")
@@ -2149,9 +2133,11 @@ class vmmDetails(vmmGObjectUI):
         show_ui("char-target-type", target_type)
         show_ui("char-target-name", chardev.target_name)
         # Only show for the qemu guest agent, which we get async
-        # notifiations about connection state. For spice this UI field
+        # notifications about connection state. For spice this UI field
         # can get out of date
         show_ui("char-target-state", chardev.target_state, doshow=is_qemuga)
+        clipboard = _("On") if chardev.source.clipboard_copypaste else _("Off")
+        show_ui("char-clipboard-sharing", clipboard, doshow=show_clipboard)
 
     def _refresh_hostdev_page(self, hostdev):
         rom_bar = hostdev.rom_bar
@@ -2565,4 +2551,6 @@ class vmmDetails(vmmGObjectUI):
         self._config_boot_move(False)
 
     def _vm_inspection_changed_cb(self, vm):
-        self._refresh_os_page()
+        row = self._get_hw_row()
+        if row and row[HW_LIST_COL_TYPE] == HW_LIST_TYPE_OS:
+            self._refresh_os_page()

@@ -20,6 +20,7 @@ class _CapsCPU(XMLBuilder):
     XML_NAME = "cpu"
     arch = XMLProperty("./arch")
     model = XMLProperty("./model")
+    vendor = XMLProperty("./vendor")
 
 
 ######################################
@@ -97,6 +98,7 @@ class _CapsGuestFeatures(XMLBuilder):
     pae = XMLProperty("./pae", is_bool=True)
     acpi = XMLProperty("./acpi/@default", is_onoff=True)
     apic = XMLProperty("./apic/@default", is_onoff=True)
+    externalSnapshot = XMLProperty("./externalSnapshot", is_bool=True)
 
 
 class _CapsGuest(XMLBuilder):
@@ -126,8 +128,18 @@ class _CapsGuest(XMLBuilder):
         for m in mobjs:
             ret.append(m.name)
             if m.canonical and m.canonical not in ret:
-                ret.append(m.canonical)
+                ret.append(m.canonical)  # pragma: no cover
         return ret
+
+    def is_machine_alias(self, domain, src, tgt):
+        """
+        Determine if machine @src is an alias for machine @tgt
+        """
+        mobjs = (domain and domain.machines) or self.machines
+        for m in mobjs:
+            if m.name == src and m.canonical == tgt:
+                return True
+        return False
 
     def is_kvm_available(self):
         """
@@ -156,6 +168,12 @@ class _CapsGuest(XMLBuilder):
         """
         return bool(self.features.apic)
 
+    def supports_externalSnapshot(self):
+        """
+        Return True if capabilities report support for external snapshots
+        """
+        return bool(self.features.externalSnapshot)
+
 
 ############################
 # Main capabilities object #
@@ -178,6 +196,9 @@ class _CapsInfo(object):
 
         self.emulator = self.domain.emulator or self.guest.emulator
         self.machines = self.guest.all_machine_names(self.domain)
+
+    def is_machine_alias(self, src, tgt):
+        return self.guest.is_machine_alias(self.domain, src, tgt)
 
 
 class Capabilities(XMLBuilder):
@@ -223,7 +244,7 @@ class Capabilities(XMLBuilder):
         if not domains:
             return None
 
-        priority = ["kvm", "xen", "qemu"]
+        priority = ["kvm", "xen", "hvf", "qemu"]
 
         for t in priority:
             for d in domains:

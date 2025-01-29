@@ -104,13 +104,31 @@ class VirtinstConnection(object):
 
     def _get_caps(self):
         if not self._caps:
-            self._caps = Capabilities(self,
-                self._libvirtconn.getCapabilities())
+            capsxml = self._libvirtconn.getCapabilities()
+            self._caps = Capabilities(self, capsxml)
+            log.debug("Fetched capabilities for %s: %s", self._uri, capsxml)
         return self._caps
     caps = property(_get_caps)
 
     def get_conn_for_api_arg(self):
         return self._libvirtconn
+
+
+    ###################
+    # Private helpers #
+    ###################
+
+    def _log_versions(self):
+        def format_version(num):
+            major = int(num / 1000000)
+            minor = int(num / 1000) % 1000
+            micro = num % 1000
+            return "%s.%s.%s" % (major, minor, micro)
+
+        log.debug("libvirt URI versions library=%s driver=%s hypervisor=%s",
+                  format_version(self.local_libvirt_version()),
+                  format_version(self.daemon_version()),
+                  format_version(self.conn_version()))
 
 
     ##############
@@ -161,6 +179,15 @@ class VirtinstConnection(object):
         if not self._open_uri:
             self._uri = self._libvirtconn.getURI()
             self._uriobj = URI(self._uri)
+
+        self._log_versions()
+        self._get_caps()  # cache and log capabilities
+
+    def get_libvirt_data_root_dir(self):
+        if self.is_privileged():
+            return "/var/lib/libvirt"
+        return os.environ.get("XDG_DATA_HOME",
+                              os.path.expanduser("~/.local/share/libvirt"))
 
 
     ####################

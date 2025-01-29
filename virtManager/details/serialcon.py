@@ -123,7 +123,7 @@ class _DataStream(vmmGObject):
         log.debug("Opening console stream for dev=%s alias=%s",
                       dev, name)
         # libxl doesn't set aliases, their open_console just defaults to
-        # opening the first console device, so don't force prescence of
+        # opening the first console device, so don't force presence of
         # an alias
 
         stream = self.conn.get_backend().newStream(libvirt.VIR_STREAM_NONBLOCK)
@@ -170,7 +170,7 @@ class _DataStream(vmmGObject):
 
 class vmmSerialConsole(vmmGObject):
     @staticmethod
-    def can_connect(vm, dev):
+    def can_connect(_vm, dev):
         """
         Check if we think we can actually open passed console/serial dev
         """
@@ -179,9 +179,7 @@ class vmmSerialConsole(vmmGObject):
 
         err = ""
 
-        if not vm.is_active():
-            err = _("Serial console not available for inactive guest")
-        elif ctype not in usable_types:
+        if ctype not in usable_types:
             err = (_("Console for device type '%s' is not supported") % ctype)
 
         return err
@@ -273,7 +271,7 @@ class vmmSerialConsole(vmmGObject):
 
         if self._vteterminal:
             scrollbar.set_adjustment(self._vteterminal.get_vadjustment())
-            align.add(self._vteterminal)
+            align.pack_start(self._vteterminal, True, True, 0)
 
         evbox.add(align)
         terminalbox.pack_start(evbox, True, True, 0)

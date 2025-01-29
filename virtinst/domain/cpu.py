@@ -102,6 +102,17 @@ class _CPUFeature(XMLBuilder):
     policy = XMLProperty("./@policy")
 
 
+class _CPUMaxphysaddr(XMLBuilder):
+    """
+    Class for generating XML for <cpu> child node <maxphysaddr>.
+    """
+    XML_NAME = "maxphysaddr"
+    _XML_PROP_ORDER = ["mode", "bits"]
+
+    mode = XMLProperty("./@mode")
+    bits = XMLProperty("./@bits", is_int=True)
+
+
 ##############
 # NUMA cells #
 ##############
@@ -211,7 +222,7 @@ class DomainCpu(XMLBuilder):
     _XML_PROP_ORDER = ["mode", "match", "check", "migratable",
             "model", "model_fallback", "model_vendor_id", "vendor",
             "topology", "cache", "features",
-            "cells", "latencies", "bandwidths"]
+            "cells", "latencies", "bandwidths", "maxphysaddr"]
 
 
     ##################
@@ -242,6 +253,8 @@ class DomainCpu(XMLBuilder):
     latencies = XMLChildProperty(_NUMALatency, relative_xpath="./numa/interconnects")
     bandwidths = XMLChildProperty(_NUMABandwidth, relative_xpath="./numa/interconnects")
 
+    maxphysaddr = XMLChildProperty(_CPUMaxphysaddr, is_single=True)
+
 
     #############################
     # Special CPU mode handling #
@@ -254,17 +267,33 @@ class DomainCpu(XMLBuilder):
     SPECIAL_MODE_HOST_COPY = "host-copy"
     SPECIAL_MODE_HOST_MODEL = "host-model"
     SPECIAL_MODE_HOST_PASSTHROUGH = "host-passthrough"
+    SPECIAL_MODE_MAXIMUM = "maximum"
     SPECIAL_MODE_CLEAR = "clear"
     SPECIAL_MODE_APP_DEFAULT = "default"
     SPECIAL_MODES = [SPECIAL_MODE_HOST_MODEL_ONLY, SPECIAL_MODE_HV_DEFAULT,
                      SPECIAL_MODE_HOST_COPY, SPECIAL_MODE_HOST_MODEL,
-                     SPECIAL_MODE_HOST_PASSTHROUGH, SPECIAL_MODE_CLEAR,
-                     SPECIAL_MODE_APP_DEFAULT]
+                     SPECIAL_MODE_HOST_PASSTHROUGH, SPECIAL_MODE_MAXIMUM,
+                     SPECIAL_MODE_CLEAR, SPECIAL_MODE_APP_DEFAULT]
+
+    def _should_use_maximum_cpu_mode(self, guest, domcaps):
+        if (domcaps.supports_maximum_cpu_mode() and
+            guest.type == "qemu" and
+            (guest.os.is_x86() or
+             guest.os.is_arm_machvirt() or
+             guest.os.is_riscv_virt() or
+             guest.os.is_loongarch64())):
+            return True
+
+        return False
 
     def _get_app_default_mode(self, guest):
         # Depending on if libvirt+qemu is new enough, we prefer
         # host-passthrough, then host-model, and finally host-model-only
+        # Emulated guests use maximum mode if available
         domcaps = guest.lookup_domcaps()
+
+        if (self._should_use_maximum_cpu_mode(guest, domcaps)):
+            return self.SPECIAL_MODE_MAXIMUM
 
         if domcaps.supports_safe_host_passthrough():
             return self.SPECIAL_MODE_HOST_PASSTHROUGH
@@ -282,7 +311,8 @@ class DomainCpu(XMLBuilder):
             log.debug("Using default cpu mode=%s", val)
 
         if (val == self.SPECIAL_MODE_HOST_MODEL or
-            val == self.SPECIAL_MODE_HOST_PASSTHROUGH):
+            val == self.SPECIAL_MODE_HOST_PASSTHROUGH or
+            val == self.SPECIAL_MODE_MAXIMUM):
             self.model = None
             self.vendor = None
             self.model_fallback = None
@@ -358,6 +388,7 @@ class DomainCpu(XMLBuilder):
 
     def set_model(self, guest, val):
         log.debug("setting cpu model %s", val)
+        self.migratable = None
         if val:
             self.mode = "custom"
             if not self.match:
@@ -436,17 +467,20 @@ class DomainCpu(XMLBuilder):
     def set_defaults(self, guest):
         if not self.conn.is_test() and not self.conn.is_qemu():
             return
-        if (self.get_xml().strip() or
-            self.special_mode_was_set):
-            # User already configured CPU
+        if self.special_mode_was_set:
+            return
+        if self.model or self.mode:
             return
 
         if guest.os.is_arm_machvirt() and guest.type == "kvm":
             self.mode = self.SPECIAL_MODE_HOST_PASSTHROUGH
 
-        elif guest.os.is_arm64() and guest.os.is_arm_machvirt():
-            # -M virt defaults to a 32bit CPU, even if using aarch64
-            self.set_model(guest, "cortex-a57")
-
         elif guest.os.is_x86() and guest.type == "kvm":
             self._set_cpu_x86_kvm_default(guest)
+
+        else:
+            domcaps = guest.lookup_domcaps()
+
+            # Prefer to emulate a feature-rich CPU instead of a basic one
+            if (self._should_use_maximum_cpu_mode(guest, domcaps)):
+                self.set_special_mode(guest, self.SPECIAL_MODE_MAXIMUM)

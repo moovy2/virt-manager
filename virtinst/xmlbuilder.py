@@ -54,7 +54,7 @@ class XMLManualAction(object):
             val = self.xpath_value
         else:
             if "=" not in str(xpath):
-                raise Exception(
+                raise ValueError(
                     "%s: Setting xpath must be in the form of XPATH=VALUE" %
                     xpath)
             xpath, val = xpath.rsplit("=", 1)
@@ -172,7 +172,7 @@ class _XMLPropertyBase(property):
 class XMLChildProperty(_XMLPropertyBase):
     """
     Property that points to a class used for parsing a subsection of
-    of the parent XML. For example when we deligate parsing
+    of the parent XML. For example when we delegate parsing
     /domain/cpu/feature of the /domain/cpu class.
 
     @child_class: XMLBuilder class this property is tracking. So for
@@ -262,9 +262,9 @@ class XMLProperty(_XMLPropertyBase):
         self._is_onoff = is_onoff
         self._do_abspath = do_abspath
 
-        conflicts = sum([int(bool(i)) for i in
+        conflicts = sum(int(bool(i)) for i in
                 [self._is_bool, self._is_int,
-                 self._is_yesno, self._is_onoff]])
+                 self._is_yesno, self._is_onoff])
         if conflicts > 1:
             raise xmlutil.DevError("Conflict property converter options.")
 
@@ -343,7 +343,7 @@ class XMLProperty(_XMLPropertyBase):
         propstore = xmlbuilder._propstore
 
         if self.propname in propstore:
-            del(propstore[self.propname])
+            del propstore[self.propname]
         propstore[self.propname] = val
 
     def _nonxml_fget(self, xmlbuilder):

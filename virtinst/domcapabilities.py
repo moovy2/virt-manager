@@ -93,6 +93,7 @@ def _make_capsblock(xml_root_name):
 class _SEV(XMLBuilder):
     XML_NAME = "sev"
     supported = XMLProperty("./@supported", is_yesno=True)
+    maxESGuests = XMLProperty("./maxESGuests")
 
 
 #############################
@@ -112,12 +113,16 @@ class _Devices(_CapsBlock):
     graphics = XMLChildProperty(_make_capsblock("graphics"), is_single=True)
     tpm = XMLChildProperty(_make_capsblock("tpm"), is_single=True)
     filesystem = XMLChildProperty(_make_capsblock("filesystem"), is_single=True)
+    redirdev = XMLChildProperty(_make_capsblock("redirdev"), is_single=True)
+    channel = XMLChildProperty(_make_capsblock("channel"), is_single=True)
+    panic = XMLChildProperty(_make_capsblock("panic"), is_single=True)
 
 
 class _Features(_CapsBlock):
     XML_NAME = "features"
     gic = XMLChildProperty(_make_capsblock("gic"), is_single=True)
     sev = XMLChildProperty(_SEV, is_single=True)
+    hyperv = XMLChildProperty(_make_capsblock("hyperv"), is_single=True)
 
 
 class _MemoryBacking(_CapsBlock):
@@ -241,6 +246,8 @@ class DomainCapabilities(XMLBuilder):
             try:
                 xml = conn.getDomainCapabilities(emulator, arch,
                     machine, hvtype)
+                log.debug("Fetched domain capabilities for (%s,%s,%s,%s): %s",
+                          emulator, arch, machine, hvtype, xml)
             except Exception:  # pragma: no cover
                 log.debug("Error fetching domcapabilities XML",
                     exc_info=True)
@@ -277,7 +284,7 @@ class DomainCapabilities(XMLBuilder):
         ],
         "aarch64": [
             r".*AAVMF_CODE\.fd",  # RHEL
-            r".*aarch64/QEMU_EFI.*",  # gerd's firmware repo
+            r".*aarch64/QEMU_EFI.*",  # fedora, gerd's firmware repo
             r".*aarch64.*",  # generic attempt at a catchall
             r".*edk2-aarch64-code\.fd",  # upstream qemu
         ],
@@ -285,6 +292,14 @@ class DomainCapabilities(XMLBuilder):
             r".*AAVMF32_CODE\.fd",  # Debian qemu-efi-arm package
             r".*arm/QEMU_EFI.*",  # fedora, gerd's firmware repo
             r".*edk2-arm-code\.fd"  # upstream qemu
+        ],
+        "riscv64": [
+            r".*RISCV_VIRT_CODE\..*",  # Fedora, Debian
+            r".*riscv64.*",  # generic attempt at a catchall
+        ],
+        "loongarch64": [
+            r".*loongarch64/QEMU_CODE\..*",  # Fedora
+            r".*loongarch64.*",  # generic attempt at a catchall
         ],
     }
 
@@ -331,7 +346,7 @@ class DomainCapabilities(XMLBuilder):
         """
         Return True if we know how to setup UEFI for the passed arch
         """
-        return self.arch in list(self._uefi_arch_patterns.keys())
+        return self.arch in self._uefi_arch_patterns
 
     def supports_uefi_loader(self):
         """
@@ -368,6 +383,10 @@ class DomainCapabilities(XMLBuilder):
         return (m and m.supported and
                 "on" in m.get_enum("hostPassthroughMigratable").get_values())
 
+    def supports_maximum_cpu_mode(self):
+        m = self.cpu.get_mode("maximum")
+        return (m and m.supported)
+
     def get_cpu_models(self):
         models = []
 
@@ -390,12 +409,15 @@ class DomainCapabilities(XMLBuilder):
     # Misc support methods #
     ########################
 
-    def supports_sev_launch_security(self):
+    def supports_sev_launch_security(self, check_es=False):
         """
         Returns False if either libvirt doesn't advertise support for SEV at
         all (< libvirt-4.5.0) or if it explicitly advertises it as unsupported
         on the platform
         """
+        if check_es:
+            return bool(self.features.sev.supported and
+                        self.features.sev.maxESGuests)
         return bool(self.features.sev.supported)
 
     def supports_video_bochs(self):
@@ -422,6 +444,14 @@ class DomainCapabilities(XMLBuilder):
         """
         models = self.devices.tpm.get_enum("model").get_values()
         backends = self.devices.tpm.get_enum("backendModel").get_values()
+
+        if self.arch == "armv7l" and models == ["tpm-tis"]:
+            # libvirt as of 8.4.0 can advertise armv7l tpm-tis support,
+            # but then explicitly rejects that config. If we see it,
+            # assume TPM is not supported
+            # https://gitlab.com/libvirt/libvirt/-/issues/329
+            return False
+
         return len(models) > 0 and bool("emulator" in backends)
 
     def supports_graphics_spice(self):
@@ -433,6 +463,30 @@ class DomainCapabilities(XMLBuilder):
             return self.conn.caps.host.cpu.arch in ["i686", "x86_64"]
 
         return self.devices.graphics.get_enum("type").has_value("spice")
+
+    def supports_channel_spicevmc(self):
+        """
+        Return False if libvirt explicitly advertises no support for
+        spice channel
+        """
+        if self.devices.channel.supported is None:
+            # Follow the original behavior in case of talking to older
+            # libvirt.
+            return True
+
+        return self.devices.channel.get_enum("type").has_value("spicevmc")
+
+    def supports_redirdev_usb(self):
+        """
+        Return False if libvirt explicitly advertises no support for
+        USB redirect
+        """
+        if self.devices.redirdev.supported is None:
+            # Follow the original behavior in case of talking to older
+            # libvirt.
+            return True
+
+        return self.devices.redirdev.get_enum("bus").has_value("usb")
 
     def supports_filesystem_virtiofs(self):
         """
@@ -446,3 +500,18 @@ class DomainCapabilities(XMLBuilder):
         Return True if libvirt advertises support for memfd memory backend
         """
         return self.memorybacking.get_enum("sourceType").has_value("memfd")
+
+    def supported_hyperv_features(self):
+        """
+        Return list of supported Hyper-V features.
+        """
+        if not self.features.hyperv.supported:
+            return []
+
+        return self.features.hyperv.get_enum("features").get_values()
+
+    def supported_panic_models(self):
+        """
+        Return list of supported panic device models.
+        """
+        return self.devices.panic.get_enum("model").get_values()

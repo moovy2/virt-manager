@@ -105,7 +105,10 @@ class _URIs(object):
         self.kvm_ppc64le = _uri_qemu + _caps("kvm-ppc64le.xml") + _domcaps("kvm-ppc64le-domcaps.xml")
         self.kvm_s390x = _uri_qemu + _caps("kvm-s390x.xml") + _domcaps("kvm-s390x-domcaps.xml")
         self.qemu_riscv64 = _uri_qemu + _caps("qemu-riscv64.xml") + _domcaps("qemu-riscv64-domcaps.xml")
+        self.kvm_loongarch64 = _uri_qemu + _caps("kvm-loongarch64.xml") + _domcaps("kvm-loongarch64-domcaps.xml")
 
+        # hvf
+        self.hvf_x86 = _uri_qemu + _caps("hvf-x86_64.xml") + _domcaps("hvf-x86_64-domcaps.xml")
 
 
     def openconn(self, uri):
@@ -219,13 +222,32 @@ def test_create(testconn, xml, define_func="defineXML"):
 
 
 def diff_compare(actual_out, filename=None, expect_out=None):
-    """Compare passed string output to contents of filename"""
+    """
+    Test suite helper for comparing two strings
+
+    If filename is passed, but the file doesn't exist, we write actual_out
+    to it. This makes it easy to populate output for new testcases
+
+    If the --regenerate-output pytest flag was passed, we re-write every
+    specified filename.
+
+    @actual_out: Output we generated
+    @filename: filename where expected good test output is stored
+    @expect_out: expected string to compare against
+    """
+    # Make sure all test output has trailing newline, simplifies diffing
+    if not actual_out.endswith("\n"):
+        actual_out += "\n"
+
     if not expect_out:
         if not os.path.exists(filename) or TESTCONFIG.regenerate_output:
             open(filename, "w").write(actual_out)
         expect_out = open(filename).read()
 
-    diff = xmlutil.diff(expect_out.rstrip(), actual_out.rstrip(),
+    if not expect_out.endswith("\n"):
+        expect_out += "\n"
+
+    diff = xmlutil.diff(expect_out, actual_out,
             filename or '', "Generated output")
     if diff:
         raise AssertionError("Conversion outputs did not match.\n%s" % diff)

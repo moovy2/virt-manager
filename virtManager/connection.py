@@ -220,6 +220,8 @@ class vmmConnection(vmmGObject):
             label = "QEMU TCG"
         elif domtype == "kvm":
             label = "KVM"
+        elif domtype == "hvf":
+            label = "Hypervisor.framework"  # pragma: no cover
 
         return label
 
@@ -648,6 +650,13 @@ class vmmConnection(vmmGObject):
 
         obj = self.get_vm_by_name(name)
 
+        # This event is triggered when deleting external snapshots and it changes
+        # shutoff VM into paused and makes that VM unusable until virt-manager is
+        # restarted so we need to ignore it in case VM is shutoff.
+        if obj and obj.is_shutoff():  # pragma: no cover
+            log.debug("received agent lifecycle event but domain is shutoff, ignoring it")
+            return
+
         if obj:
             self.idle_add(obj.recache_from_event_loop)
         else:
@@ -950,11 +959,6 @@ class vmmConnection(vmmGObject):
         return False, ConnectError
 
     def _populate_initial_state(self):
-        log.debug("libvirt version=%s", self._backend.local_libvirt_version())
-        log.debug("daemon version=%s", self._backend.daemon_version())
-        log.debug("conn version=%s", self._backend.conn_version())
-        log.debug("%s capabilities:\n%s", self.get_uri(), self.caps.get_xml())
-
         if not self.support.conn_domain():  # pragma: no cover
             raise RuntimeError("Connection does not support required "
                     "domain listing APIs")

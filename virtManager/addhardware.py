@@ -270,8 +270,7 @@ class vmmAddHardware(vmmGObjectUI):
                       True, None)
         add_hw_option(_("RNG"), "system-run", PAGE_RNG, True, None)
         add_hw_option(_("Panic Notifier"), "system-run", PAGE_PANIC,
-            bool(DevicePanic.get_models(self.vm.get_xmlobj())),
-            _("Not supported for this hypervisor/libvirt/arch combination."))
+                      True, None)
         add_hw_option(_("VirtIO VSOCK"), "network-idle", PAGE_VSOCK,
             self.vm.is_hvm(),
             _("Not supported for this hypervisor/libvirt/arch combination."))
@@ -308,6 +307,7 @@ class vmmAddHardware(vmmGObjectUI):
         self.widget("char-path").set_text("")
         self.widget("char-channel").set_text("")
         self.widget("char-auto-socket").set_active(True)
+        self.widget("char-vdagent-clipboard").set_active(True)
 
 
         # RNG params
@@ -370,8 +370,8 @@ class vmmAddHardware(vmmGObjectUI):
 
         msg = _("These changes will take effect after "
                 "the next guest shutdown.")
-        dtype = (hotplug_err and
-                 Gtk.MessageType.WARNING or Gtk.MessageType.INFO)
+        dtype = (Gtk.MessageType.WARNING if hotplug_err else
+                 Gtk.MessageType.INFO)
         hotplug_msg = ""
         if hotplug_err:
             hotplug_msg += (hotplug_err[0] + "\n\n" +
@@ -399,7 +399,8 @@ class vmmAddHardware(vmmGObjectUI):
                DeviceSerial.TYPE_UNIX]
         if char_class.XML_NAME == "channel":
             ret = [DeviceSerial.TYPE_SPICEVMC,
-                   DeviceSerial.TYPE_SPICEPORT] + ret
+                   DeviceSerial.TYPE_SPICEPORT,
+                   DeviceSerial.TYPE_QEMUVDAGENT] + ret
         return ret
 
     @staticmethod
@@ -425,6 +426,7 @@ class vmmAddHardware(vmmGObjectUI):
             DeviceSerial.TYPE_UNIX: _("UNIX socket"),
             DeviceSerial.TYPE_SPICEVMC: _("Spice agent"),
             DeviceSerial.TYPE_SPICEPORT: _("Spice port"),
+            DeviceSerial.TYPE_QEMUVDAGENT: _("QEMU vdagent"),
         }
         return labels.get(val, val)
 
@@ -508,16 +510,6 @@ class vmmAddHardware(vmmGObjectUI):
             "xen": _("Xen"),
         }
         return bus_mappings.get(bus, bus)
-
-    @staticmethod
-    def panic_pretty_model(val):
-        labels = {
-            DevicePanic.MODEL_ISA: _("ISA"),
-            DevicePanic.MODEL_PSERIES: _("pSeries"),
-            DevicePanic.MODEL_HYPERV: _("Hyper-V"),
-            DevicePanic.MODEL_S390: _("s390"),
-        }
-        return labels.get(val, val)
 
     @staticmethod
     def rng_pretty_type(val):
@@ -868,12 +860,13 @@ class vmmAddHardware(vmmGObjectUI):
 
 
     def _build_panic_model_combo(self):
-        values = []
-        for m in DevicePanic.get_models(self.vm.get_xmlobj()):
-            values.append([m, vmmAddHardware.panic_pretty_model(m)])
+        guest = self.vm.get_xmlobj()
+        values = [[None, _("Hypervisor default")]]
+        for m in guest.lookup_domcaps().supported_panic_models():
+            values.append([m, m])
 
-        default = DevicePanic.get_default_model(self.vm.get_xmlobj())
-        uiutil.build_simple_combo(self.widget("panic-model"), values, default_value=default)
+        uiutil.build_simple_combo(self.widget("panic-model"), values)
+        uiutil.set_list_selection(self.widget("panic-model"), None)
 
 
     def _build_controller_type_combo(self):
@@ -1114,11 +1107,14 @@ class vmmAddHardware(vmmGObjectUI):
         supports_path = [dev.TYPE_FILE, dev.TYPE_UNIX,
                          dev.TYPE_DEV, dev.TYPE_PIPE]
         supports_channel = [dev.TYPE_SPICEPORT]
+        supports_clipboard = [dev.TYPE_QEMUVDAGENT]
 
         uiutil.set_grid_row_visible(self.widget("char-path-label"),
                 devtype in supports_path)
         uiutil.set_grid_row_visible(self.widget("char-channel-label"),
                 devtype in supports_channel)
+        uiutil.set_grid_row_visible(self.widget("char-vdagent-clipboard-label"),
+                devtype in supports_clipboard)
 
         uiutil.set_grid_row_visible(
             self.widget("char-target-name-label"), ischan)
@@ -1472,6 +1468,7 @@ class vmmAddHardware(vmmGObjectUI):
         source_channel = self.widget("char-channel").get_text()
         target_name = self.widget("char-target-name").get_child().get_text()
         target_type = uiutil.get_list_selection(typebox)
+        clipboard = self.widget("char-vdagent-clipboard").get_active()
 
         if not self.widget("char-path").get_visible():
             source_path = None
@@ -1479,6 +1476,9 @@ class vmmAddHardware(vmmGObjectUI):
             source_channel = None
         if not self.widget("char-target-name").get_visible():
             target_name = None
+        if not self.widget("char-vdagent-clipboard").get_visible():
+            clipboard = None
+
         if not typebox.get_visible():
             target_type = None
 
@@ -1486,6 +1486,7 @@ class vmmAddHardware(vmmGObjectUI):
         dev.type = devtype
         dev.source.path = source_path
         dev.source.channel = source_channel
+        dev.source.clipboard_copypaste = clipboard
         dev.target_name = target_name
         dev.target_type = target_type
         return dev
@@ -1552,7 +1553,7 @@ class vmmAddHardware(vmmGObjectUI):
         controller_num = [x for x in controllers if
                 (x.type == controller_type)]
         if len(controller_num) > 0:
-            index_new = max([x.index for x in controller_num]) + 1
+            index_new = max(int(x.index or 0) for x in controller_num) + 1
             dev.index = index_new
 
         dev.type = controller_type
@@ -1582,8 +1583,8 @@ class vmmAddHardware(vmmGObjectUI):
                 textent.set_text(path)
 
         reason = (isdir and
-                  self.config.CONFIG_DIR_FS or
-                  self.config.CONFIG_DIR_IMAGE)
+                  vmmStorageBrowser.REASON_FS or
+                  vmmStorageBrowser.REASON_IMAGE)
         if self._storagebrowser is None:
             self._storagebrowser = vmmStorageBrowser(self.conn)
 

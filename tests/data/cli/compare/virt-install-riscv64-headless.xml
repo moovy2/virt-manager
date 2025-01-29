@@ -9,10 +9,11 @@
   <memory>65536</memory>
   <currentMemory>65536</currentMemory>
   <vcpu>2</vcpu>
-  <os>
+  <os firmware="efi">
     <type arch="riscv64" machine="virt">hvm</type>
     <boot dev="hd"/>
   </os>
+  <cpu mode="maximum"/>
   <clock offset="utc"/>
   <devices>
     <emulator>/usr/bin/qemu-system-riscv64</emulator>
@@ -47,6 +48,9 @@
       <source mode="bind"/>
       <target type="virtio" name="org.qemu.guest_agent.0"/>
     </channel>
+    <tpm>
+      <backend type="emulator"/>
+    </tpm>
     <memballoon model="virtio"/>
     <rng model="virtio">
       <backend model="random">/dev/urandom</backend>
